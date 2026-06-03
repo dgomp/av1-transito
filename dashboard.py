@@ -19,7 +19,7 @@ import seaborn as sns
 import io
 
 from sklearn.tree import DecisionTreeClassifier, plot_tree, export_text
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import OneHotEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score, confusion_matrix, classification_report
@@ -77,7 +77,8 @@ def carregar_dados() -> pd.DataFrame:
 def treinar_modelo(max_depth: int, min_samples_leaf: int):
     """
     Carrega, pré-processa e treina o modelo.
-    Retornos: modelo, X_test, y_test, y_pred, importancias, encoders, df_clean
+    Retornos: modelo, X_train, X_test, y_train, y_test, y_pred,
+              importancias, encoded_cols, df_clean
     """
     df = carregar_dados()
 
@@ -87,15 +88,24 @@ def treinar_modelo(max_depth: int, min_samples_leaf: int):
         lambda x: 1 if x in ('Com Vítimas Feridas', 'Com Vítimas Fatais') else 0
     )
 
-    X_raw = df_clean[FEATURES].fillna('Ignorado')
+    X_raw = df_clean[FEATURES].fillna('Ignorado').astype(str)
     y = df_clean['com_vitimas']
 
-    encoders = {}
-    X_enc = X_raw.copy()
-    for col in FEATURES:
-        le = LabelEncoder()
-        X_enc[col] = le.fit_transform(X_raw[col].astype(str))
-        encoders[col] = le
+    # One-Hot Encoding (features nominais) — evita a ordem inteira arbitrária
+    # do LabelEncoder, que numa árvore distorce/infla a importância das
+    # features de alta cardinalidade.
+    ohe = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+    X_arr = ohe.fit_transform(X_raw)
+    encoded_cols = list(ohe.get_feature_names_out(FEATURES))
+    X_enc = pd.DataFrame(X_arr, columns=encoded_cols, index=X_raw.index)
+
+    # Mapa coluna codificada → feature original (p/ reagregar a importância)
+    col_to_feature = {}
+    idx = 0
+    for feat, cats in zip(FEATURES, ohe.categories_):
+        for _ in cats:
+            col_to_feature[encoded_cols[idx]] = feat
+            idx += 1
 
     X_train, X_test, y_train, y_test = train_test_split(
         X_enc, y, test_size=0.20, random_state=42, stratify=y
@@ -110,13 +120,16 @@ def treinar_modelo(max_depth: int, min_samples_leaf: int):
     modelo.fit(X_train, y_train)
     y_pred = modelo.predict(X_test)
 
-    importancias = pd.DataFrame({
-        'feature': FEATURES,
-        'importancia': modelo.feature_importances_
-    }).sort_values('importancia', ascending=False).reset_index(drop=True)
+    # Importância reagregada por feature original (one-hot gera uma por coluna)
+    imp_col  = pd.Series(modelo.feature_importances_, index=encoded_cols)
+    imp_feat = imp_col.groupby(col_to_feature).sum().reindex(FEATURES).fillna(0.0)
+    importancias = (imp_feat.rename('importancia')
+                    .reset_index().rename(columns={'index': 'feature'})
+                    .sort_values('importancia', ascending=False)
+                    .reset_index(drop=True))
     importancias['importancia_pct'] = importancias['importancia'] * 100
 
-    return modelo, X_train, X_test, y_train, y_test, y_pred, importancias, encoders, df_clean
+    return modelo, X_train, X_test, y_train, y_test, y_pred, importancias, encoded_cols, df_clean
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +149,7 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # CARREGAR / TREINAR
 # ---------------------------------------------------------------------------
-modelo, X_train, X_test, y_train, y_test, y_pred, importancias, encoders, df_clean = treinar_modelo(
+modelo, X_train, X_test, y_train, y_test, y_pred, importancias, encoded_cols, df_clean = treinar_modelo(
     max_depth, min_samples
 )
 
@@ -385,7 +398,7 @@ depth_viz = st.slider(
 fig, ax = plt.subplots(figsize=(30, 12))
 plot_tree(
     modelo,
-    feature_names=FEATURES,
+    feature_names=encoded_cols,
     class_names=['Sem Vítimas', 'Com Vítimas'],
     filled=True, rounded=True,
     max_depth=depth_viz,
@@ -401,7 +414,7 @@ st.pyplot(fig)
 plt.close()
 
 with st.expander("Ver Regras da Árvore em Texto (primeiros 2 níveis)"):
-    regras = export_text(modelo, feature_names=FEATURES, max_depth=2)
+    regras = export_text(modelo, feature_names=encoded_cols, max_depth=2)
     st.code(regras, language='text')
 
 # ---------------------------------------------------------------------------

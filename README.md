@@ -35,19 +35,21 @@ Análise baseada em dados dos sinistros de trânsito registrados pela **Polícia
 
 | Métrica | Valor |
 |---|---|
-| Acurácia (treino) | 86.81% |
-| Acurácia (teste) | 86.58% |
-| Overfitting | Nenhum (Δ = 0.23%) |
+| Acurácia (treino) | 87.08% |
+| Acurácia (teste) | 86.76% |
+| Overfitting | Nenhum (Δ = 0.31%) |
 
 ### Importância das Features
 
+Features nominais codificadas com **One-Hot Encoding**; a importância é reagregada por feature original.
+
 | Rank | Feature | Importância |
 |---|---|---|
-| 1 | `causa_acidente` | ~46.9% |
-| 2 | `tipo_acidente` | ~46.3% |
-| 3 | `uf` | ~1.9% |
-| 4 | `fase_dia` | ~1.9% |
-| 5 | `uso_solo` | ~1.1% |
+| 1 | `tipo_acidente` | ~78.5% |
+| 2 | `causa_acidente` | ~15.4% |
+| 3 | `sentido_via` | ~2.6% |
+| 4 | `fase_dia` | ~1.7% |
+| 5 | `uf` | ~1.2% |
 
 ---
 

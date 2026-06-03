@@ -148,7 +148,7 @@ CSV (PRF 2025)
     │
     ▼
 [4] Codificação das features
-    │   └─ LabelEncoder por coluna categórica
+    │   └─ One-Hot Encoding por coluna categórica (1 binária por categoria)
     │
     ▼
 [5] Divisão treino/teste
@@ -196,11 +196,11 @@ modelo.fit(X_train, y_train)
 
 | Métrica | Valor |
 |---|---|
-| Total de nós | 189 |
+| Total de nós | 85 |
 | Profundidade real | 7 |
-| Folhas | 95 |
+| Folhas | 43 |
 
-A árvore seleciona `causa_acidente` como **nó raiz**, o atributo com maior ganho de informação em relação à variável alvo, confirmando que o comportamento do condutor é o principal fator discriminante entre sinistros com e sem vítimas.
+A árvore seleciona uma categoria de `tipo_acidente` como **nó raiz** (`tipo_acidente_Incêndio`). A importância agregada (Seção 7) confirma que `tipo_acidente` e `causa_acidente` são, juntos, os atributos que mais discriminam sinistros com e sem vítimas — ou seja, a **dinâmica do evento e o comportamento do condutor** pesam mais que as condições da via ou a meteorologia.
 
 ---
 
@@ -210,31 +210,32 @@ A árvore seleciona `causa_acidente` como **nó raiz**, o atributo com maior gan
 
 | Conjunto | Acurácia |
 |---|---|
-| Treino | **86,81%** |
-| Teste | **86,58%** |
-| Diferença | 0,23% |
+| Treino | **87,08%** |
+| Teste | **86,76%** |
+| Diferença | 0,31% |
 
-A diferença de apenas 0,23 ponto percentual entre treino e teste indica **ausência de overfitting**: o modelo generaliza bem para dados novos.
+A diferença de apenas 0,31 ponto percentual entre treino e teste indica **ausência de overfitting**: o modelo generaliza bem para dados novos.
 
 ### Matriz de Confusão
 
 |  | Previsto: Sem Vítimas | Previsto: Com Vítimas |
 |---|---|---|
-| **Real: Sem Vítimas** | 294 (VP Negativo) | 1.934 (FP) |
-| **Real: Com Vítimas** | 12 (FN) | 12.266 (VP Positivo) |
+| **Real: Sem Vítimas** | 325 (VN) | 1.903 (FP) |
+| **Real: Com Vítimas** | 17 (FN) | 12.261 (VP) |
 
 **Interpretação:**
 
-- O modelo identifica corretamente **12.266 de 12.278** sinistros com vítimas (recall de 99,9%) - alta sensibilidade para a classe crítica
-- O principal erro são os **Falsos Positivos**: 1.934 sinistros sem vítimas classificados como com vítimas (o modelo "peca pelo excesso de cautela", o que é aceitável em contexto de segurança pública)
-- Apenas **12 sinistros com vítimas** foram incorretamente classificados como sem vítimas - erro de alta gravidade praticamente eliminado
+- O modelo identifica corretamente **12.261 de 12.278** sinistros com vítimas (recall de 99,9%) - alta sensibilidade para a classe crítica
+- O principal erro são os **Falsos Positivos**: 1.903 sinistros sem vítimas classificados como com vítimas (o modelo "peca pelo excesso de cautela", o que é aceitável em contexto de segurança pública)
+- Apenas **17 sinistros com vítimas** foram incorretamente classificados como sem vítimas - erro de alta gravidade praticamente eliminado
+- Ressalva: a base é desbalanceada (84,6% com vítimas), então a acurácia é puxada pela classe majoritária; o **recall de apenas 15% na classe "Sem Vítimas"** mostra que o modelo tem dificuldade de identificar sinistros sem vítimas. O valor gerencial está na priorização por importância de atributos, não na predição individual
 
 ### Relatório de Classificação
 
 | Classe | Precisão | Recall | F1-Score | Suporte |
 |---|---|---|---|---|
-| Sem Vítimas | 0,96 | 0,13 | 0,23 | 2.228 |
-| Com Vítimas | 0,86 | 1,00 | 0,93 | 12.278 |
+| Sem Vítimas | 0,95 | 0,15 | 0,25 | 2.228 |
+| Com Vítimas | 0,87 | 1,00 | 0,93 | 12.278 |
 | **Média ponderada** | **0,88** | **0,87** | **0,82** | **14.506** |
 
 O F1-Score de **0,93** para a classe "Com Vítimas" confirma a boa performance do modelo para o caso de maior interesse gerencial.
@@ -243,24 +244,30 @@ O F1-Score de **0,93** para a classe "Com Vítimas" confirma a boa performance d
 
 ## 7. Atributos Relevantes - Análise de Importância
 
-A importância de cada feature é calculada como a **redução total de entropia ponderada pelo número de amostras** que passam pelos nós onde aquele atributo foi usado para divisão.
+A importância de cada feature é calculada como a **redução total de entropia ponderada pelo número de amostras** que passam pelos nós onde aquele atributo foi usado para divisão. Como as features foram codificadas com One-Hot, a importância nativa do modelo é **por categoria** (ex.: `tipo_acidente_Colisão frontal`); os valores abaixo são **reagregados por feature original** (soma das colunas de cada feature).
 
 | Rank | Feature | Importância | % Acumulado |
 |---|---|---|---|
-| 1 | `causa_acidente` | 46,90% | 46,90% |
-| 2 | `tipo_acidente` | 46,28% | 93,18% |
-| 3 | `uf` | 1,88% | 95,06% |
-| 4 | `fase_dia` | 1,88% | 96,94% |
-| 5 | `uso_solo` | 1,07% | 98,01% |
-| 6 | `tracado_via` | 0,64% | 98,65% |
-| 7 | `condicao_metereologica` | 0,55% | 99,20% |
-| 8 | `tipo_pista` | 0,40% | 99,60% |
-| 9 | `dia_semana` | 0,22% | 99,82% |
-| 10 | `sentido_via` | 0,17% | 100,00% |
+| 1 | `tipo_acidente` | 78,47% | 78,47% |
+| 2 | `causa_acidente` | 15,40% | 93,87% |
+| 3 | `sentido_via` | 2,63% | 96,50% |
+| 4 | `fase_dia` | 1,70% | 98,20% |
+| 5 | `uf` | 1,22% | 99,42% |
+| 6 | `uso_solo` | 0,25% | 99,67% |
+| 7 | `condicao_metereologica` | 0,20% | 99,87% |
+| 8 | `tipo_pista` | 0,11% | 99,98% |
+| 9 | `tracado_via` | 0,02% | 100,00% |
+| 10 | `dia_semana` | 0,00% | 100,00% |
 
 ### Interpretação
 
-Os dois primeiros atributos - `causa_acidente` e `tipo_acidente` - respondem por **93,18% do poder explicativo** do modelo. Isso revela que a gravidade do sinistro é determinada principalmente por **fatores comportamentais e dinâmicos do evento**, e não pelas condições da via ou meteorologia. Essa descoberta contraria a percepção intuitiva de que fatores externos (chuva, pista ruim) seriam os principais vilões.
+Os dois primeiros atributos - `tipo_acidente` e `causa_acidente` - respondem por **93,87% do poder explicativo** do modelo. Isso revela que a gravidade do sinistro é determinada principalmente por **fatores comportamentais e dinâmicos do evento** (que tipo de colisão ocorre e o que a causou), e não pelas condições da via ou meteorologia. Essa descoberta contraria a percepção intuitiva de que fatores externos (chuva, pista ruim) seriam os principais vilões.
+
+### Nota metodológica - escolha do encoding
+
+As 10 features são **nominais** (sem ordem natural). A versão inicial usava `LabelEncoder`, que atribui um inteiro arbitrário a cada categoria. Em uma árvore de decisão, essa ordem falsa permite cortes em faixas de códigos sem sentido e, sobretudo, **infla a importância de features de alta cardinalidade** (viés conhecido). A troca para `OneHotEncoder` mantém a acurácia praticamente idêntica (86,58% → 86,76%), mas corrige o ranking de importância — que é o produto que fundamenta as campanhas. O efeito ficou evidente em `tracado_via`: com label encoding aparecia com 0,64% de importância; com one-hot cai para 0,02%, revelando que era um artefato de cardinalidade.
+
+> 🚩 **Alerta de qualidade de dado:** `tracado_via` apresenta **605 categorias**, pois a base PRF combina múltiplos traçados em um mesmo campo (ex.: `Aclive;Curva;Em Obras`). Recomenda-se, em trabalhos futuros, **decompor** esse campo em colunas binárias por traçado (curva, aclive, em obras…) para uma análise mais limpa.
 
 ---
 
@@ -270,8 +277,21 @@ Com base nos atributos identificados como mais relevantes, propõem-se cinco cam
 
 ---
 
-### Campanha 1 - "Dirija com Atenção"
-**Feature:** `causa_acidente` (importância: 46,90%)
+### Campanha 1 - "Distância Segura Salva Vidas"
+**Feature:** `tipo_acidente` (importância: 78,47%)
+
+Os tipos de acidente mais frequentes com vítimas são: *colisão traseira*, *colisão frontal*, *saída de leito carroçável*, *tombamento* e *atropelamento de pedestre*. A colisão traseira, em particular, está diretamente relacionada à falta de distância segura e atenção do condutor ao veículo à frente.
+
+| Item | Detalhe |
+|---|---|
+| **Foco** | Prevenção de colisões traseiras, frontais, saídas de pista e atropelamentos |
+| **Ações** | Painéis de mensagem variável indicando distância segura; fiscalização com câmeras inteligentes de ultrapassagem; treinamento específico para motoristas de veículos pesados |
+| **Público-alvo** | Motoristas de caminhões, ônibus e veículos de carga |
+
+---
+
+### Campanha 2 - "Dirija com Atenção"
+**Feature:** `causa_acidente` (importância: 15,40%)
 
 As causas de maior incidência identificadas no dataset incluem: *ausência de reação do condutor*, *reação tardia ou ineficiente*, *velocidade incompatível* e *ingestão de álcool*. Todas são causas comportamentais e, portanto, passíveis de intervenção educativa.
 
@@ -283,34 +303,21 @@ As causas de maior incidência identificadas no dataset incluem: *ausência de r
 
 ---
 
-### Campanha 2 - "Distância Segura Salva Vidas"
-**Feature:** `tipo_acidente` (importância: 46,28%)
+### Campanha 3 - "Sentido Correto - Vida Garantida"
+**Feature:** `sentido_via` (importância: 2,63%)
 
-Os tipos de acidente mais frequentes com vítimas são: *colisão traseira*, *colisão frontal*, *saída de leito carroçável* e *tombamento*. A colisão traseira, em particular, é diretamente relacionada à falta de distância segura e atenção do condutor ao veículo à frente.
-
-| Item | Detalhe |
-|---|---|
-| **Foco** | Prevenção de colisões traseiras, frontais e saídas de pista |
-| **Ações** | Painéis de mensagem variável indicando distância segura; fiscalização com câmeras inteligentes de ultrapassagem; treinamento específico para motoristas de veículos pesados |
-| **Público-alvo** | Motoristas de caminhões, ônibus e veículos de carga |
-
----
-
-### Campanha 3 - Campanhas Regionalizadas por Estado
-**Feature:** `uf` (importância: 1,88%)
-
-A variação por estado indica que o perfil dos sinistros difere significativamente entre as UFs, influenciado por características da malha viária, frota, clima e perfil socioeconômico local.
+O sentido da via aparece associado a sinistros mais graves, especialmente em casos de contramão e ultrapassagens indevidas em rodovias de pista simples, onde o risco de colisão frontal é elevado.
 
 | Item | Detalhe |
 |---|---|
-| **Foco** | Estados com maior concentração de sinistros com vítimas |
-| **Ações** | Parcerias entre SENATRAN e DESTRANs estaduais; campanhas com linguagem e contexto adaptados ao perfil regional |
-| **Público-alvo** | Órgãos gestores estaduais de trânsito e condutores por UF |
+| **Foco** | Contramão e ultrapassagens indevidas |
+| **Ações** | Fiscalização com câmeras de monitoramento inteligente; educação sobre regras de preferência e sinalização de sentido |
+| **Público-alvo** | Condutores em rodovias de pista simples |
 
 ---
 
 ### Campanha 4 - "Noite Exige Mais Cuidado"
-**Feature:** `fase_dia` (importância: 1,88%)
+**Feature:** `fase_dia` (importância: 1,70%)
 
 Sinistros ocorridos em *plena noite* e *anoitecer* apresentam maior proporção de vítimas, associados à redução da visibilidade e ao aumento da fadiga do condutor.
 
@@ -322,24 +329,24 @@ Sinistros ocorridos em *plena noite* e *anoitecer* apresentam maior proporção 
 
 ---
 
-### Campanha 5 - "Zona Rural - Atenção Redobrada"
-**Feature:** `uso_solo` (importância: 1,07%)
+### Campanha 5 - Campanhas Regionalizadas por Estado
+**Feature:** `uf` (importância: 1,22%)
 
-Sinistros em áreas rurais (pista simples, menor infraestrutura de atendimento de emergência) tendem a apresentar maior severidade. A distância dos recursos de socorro agrava os desfechos fatais.
+A variação por estado indica que o perfil dos sinistros difere significativamente entre as UFs, influenciado por características da malha viária, frota, clima e perfil socioeconômico local.
 
 | Item | Detalhe |
 |---|---|
-| **Foco** | Rodovias em áreas rurais |
-| **Ações** | Reforço de sinalização em acessos a propriedades rurais; redutores de velocidade em pontos críticos; ampliação de postos de atendimento emergencial |
-| **Público-alvo** | Condutores e comunidades rurais lindeiras às rodovias |
+| **Foco** | Estados com maior concentração de sinistros com vítimas |
+| **Ações** | Parcerias entre SENATRAN e DESTRANs estaduais; campanhas com linguagem e contexto adaptados ao perfil regional |
+| **Público-alvo** | Órgãos gestores estaduais de trânsito e condutores por UF |
 
 ---
 
 ## 9. Conclusão
 
-O modelo de Árvore de Decisão treinado sobre **72.528 registros reais** da PRF alcançou **86,58% de acurácia** no conjunto de teste, sem overfitting, e revelou um resultado de alto valor para a política pública:
+O modelo de Árvore de Decisão treinado sobre **72.528 registros reais** da PRF alcançou **86,76% de acurácia** no conjunto de teste, sem overfitting, e revelou um resultado de alto valor para a política pública:
 
-> **93% do poder explicativo da gravidade dos sinistros está concentrado em dois atributos: a causa do acidente e o tipo do acidente**, ambos de natureza predominantemente comportamental.
+> **93,87% do poder explicativo da gravidade dos sinistros está concentrado em dois atributos: o tipo do acidente e a causa do acidente**, ambos de natureza predominantemente comportamental.
 
 Isso significa que **investir em educação e fiscalização do comportamento do condutor tem maior retorno esperado** do que focar exclusivamente em melhorias de infraestrutura, sinalização ou condições climáticas, embora esses fatores também sejam relevantes.
 

@@ -36,7 +36,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from sklearn.tree import DecisionTreeClassifier, plot_tree, export_text
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import OneHotEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score, confusion_matrix,
@@ -144,10 +144,11 @@ def preprocessar(df: pd.DataFrame):
       1. Remove linhas sem classificação (alvo nulo)
       2. Cria target binário: 1 = com vítimas / 0 = sem vítimas
       3. Preenche eventuais nulos nas features com 'Ignorado'
-      4. Aplica LabelEncoder em cada feature categórica
+      4. Aplica One-Hot Encoding nas features categóricas nominais
       5. Divide em treino/teste estratificado
 
-    Retorna: X_train, X_test, y_train, y_test, encoders, feature_names
+    Retorna: X_train, X_test, y_train, y_test, ohe, feature_names,
+             encoded_cols, col_to_feature
     """
     print(f"\n{'='*60}")
     print("3. PRÉ-PROCESSAMENTO")
@@ -168,19 +169,30 @@ def preprocessar(df: pd.DataFrame):
     print(df_clean['com_vitimas'].value_counts().rename({1: 'Com Vítimas (1)', 0: 'Sem Vítimas (0)'}))
 
     # --- Selecionar features e preencher nulos ---
-    X_raw = df_clean[FEATURES].fillna('Ignorado')
+    X_raw = df_clean[FEATURES].fillna('Ignorado').astype(str)
     y = df_clean['com_vitimas']
 
-    # --- Codificação label encoding ---
-    # Cada coluna categórica recebe um LabelEncoder independente
-    encoders = {}
-    X_enc = X_raw.copy()
-    for col in FEATURES:
-        le = LabelEncoder()
-        X_enc[col] = le.fit_transform(X_raw[col].astype(str))
-        encoders[col] = le
+    # --- Codificação One-Hot ---
+    # As features são nominais (sem ordem natural). O One-Hot cria uma coluna
+    # binária por categoria, evitando a ordem inteira arbitrária que o
+    # LabelEncoder imporia (ex.: causa A=0, causa B=1...). Numa árvore, essa
+    # ordem falsa permite cortes em faixas de códigos sem sentido e infla a
+    # importância das features de alta cardinalidade.
+    ohe = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+    X_arr = ohe.fit_transform(X_raw)
+    encoded_cols = list(ohe.get_feature_names_out(FEATURES))
+    X_enc = pd.DataFrame(X_arr, columns=encoded_cols, index=X_raw.index)
 
-    print(f"\nFeatures utilizadas ({len(FEATURES)}):")
+    # Mapa coluna codificada → feature original (para reagregar a importância)
+    col_to_feature = {}
+    idx = 0
+    for feat, cats in zip(FEATURES, ohe.categories_):
+        for _ in cats:
+            col_to_feature[encoded_cols[idx]] = feat
+            idx += 1
+
+    print(f"\nFeatures utilizadas ({len(FEATURES)} nominais -> "
+          f"{len(encoded_cols)} colunas one-hot):")
     for f in FEATURES:
         n_cat = X_raw[f].nunique()
         print(f"  {f:<30} {n_cat} categorias")
@@ -196,7 +208,7 @@ def preprocessar(df: pd.DataFrame):
     print(f"  Treino : {len(X_train):,} registros")
     print(f"  Teste  : {len(X_test):,} registros")
 
-    return X_train, X_test, y_train, y_test, encoders, FEATURES
+    return X_train, X_test, y_train, y_test, ohe, FEATURES, encoded_cols, col_to_feature
 
 
 def treinar_modelo(X_train, y_train) -> DecisionTreeClassifier:
@@ -277,20 +289,29 @@ def avaliar_modelo(modelo: DecisionTreeClassifier,
 
 
 def analisar_importancia(modelo: DecisionTreeClassifier,
-                         feature_names: list) -> pd.DataFrame:
+                         feature_names: list,
+                         encoded_cols: list,
+                         col_to_feature: dict) -> pd.DataFrame:
     """
     Calcula e exibe a importância de cada feature na árvore.
     Importância = redução total de impureza (entropia) ponderada pelo
     número de amostras que passam por cada nó de divisão.
+
+    Com One-Hot, a importância nativa do modelo é POR COLUNA (ex.:
+    'tipo_acidente_Colisão traseira'). Ela é REAGREGADA aqui, somando-se as
+    colunas de cada feature original, para obter a importância POR FEATURE —
+    base do ranking que fundamenta a proposta de campanhas.
     """
     print(f"\n{'='*60}")
     print("6. IMPORTÂNCIA DAS FEATURES (Ganho de Informação Agregado)")
     print(f"{'='*60}")
 
-    importancias = pd.DataFrame({
-        'feature': feature_names,
-        'importancia': modelo.feature_importances_
-    }).sort_values('importancia', ascending=False).reset_index(drop=True)
+    imp_col  = pd.Series(modelo.feature_importances_, index=encoded_cols)
+    imp_feat = imp_col.groupby(col_to_feature).sum().reindex(feature_names).fillna(0.0)
+    importancias = (imp_feat.rename('importancia')
+                    .reset_index().rename(columns={'index': 'feature'})
+                    .sort_values('importancia', ascending=False)
+                    .reset_index(drop=True))
 
     importancias['rank'] = importancias.index + 1
     importancias['importancia_pct'] = importancias['importancia'] * 100
@@ -535,7 +556,8 @@ def main():
     salvar_distribuicao_alvo(df, OUTPUT_DIR)
 
     # 3. Pré-processamento
-    X_train, X_test, y_train, y_test, encoders, feature_names = preprocessar(df)
+    (X_train, X_test, y_train, y_test,
+     ohe, feature_names, encoded_cols, col_to_feature) = preprocessar(df)
 
     # 4. Treinamento
     modelo = treinar_modelo(X_train, y_train)
@@ -543,24 +565,24 @@ def main():
     # 5. Avaliação
     y_pred, cm = avaliar_modelo(modelo, X_train, X_test, y_train, y_test)
 
-    # 6. Importância das features
-    importancias = analisar_importancia(modelo, feature_names)
+    # 6. Importância das features (reagregada por feature original)
+    importancias = analisar_importancia(modelo, feature_names, encoded_cols, col_to_feature)
 
     # 7. Regras da árvore (primeiros nós)
     print(f"\n{'='*60}")
     print("REGRAS DA ÁRVORE (primeiros 2 níveis - texto)")
     print(f"{'='*60}")
-    regras = export_text(modelo, feature_names=feature_names, max_depth=2)
+    regras = export_text(modelo, feature_names=encoded_cols, max_depth=2)
     print(regras)
 
     # 8. Proposta de campanhas
-    propor_campanhas(importancias, modelo, encoders, feature_names)
+    propor_campanhas(importancias, modelo, ohe, feature_names)
 
     # 9. Visualizações
     print(f"\n{'='*60}")
     print("8. SALVANDO VISUALIZAÇÕES")
     print(f"{'='*60}")
-    salvar_arvore(modelo, feature_names, OUTPUT_DIR)
+    salvar_arvore(modelo, encoded_cols, OUTPUT_DIR)
     salvar_matriz_confusao(cm, OUTPUT_DIR)
     salvar_importancia(importancias, OUTPUT_DIR)
 
